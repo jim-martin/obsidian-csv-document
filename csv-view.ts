@@ -1,42 +1,12 @@
 import { TFile, TextFileView, WorkspaceLeaf } from "obsidian";
-import { EditorView } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
-// import { basicExtensions, languageExtension } from "./codemirror";
+import * as Papa from "papaparse";
 
-/**
- * The plaintext view shows a plaintext file, hence it extends the text file view.
- * Rewritten to use CM6.
- * 
- * Code from here: https://github.com/Zachatoo/obsidian-css-editor/blob/main/src/CssEditorView.ts
- * 
- * @version 0.3.0
- * @author dbarenholz
- */
 export class CSVView extends TextFileView {
-	private editorView: EditorView;
-	private editorState: EditorState;
+	private csvData: Papa.ParseResult<unknown>;
 	file: TFile;
-
+	
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
-
-		this.editorState = EditorState.create({
-			extensions: [
-			// 	basicExtensions,
-			// 	// TODO: Figure out how to nicely set language modes.
-			// 	languageExtension,
-				EditorView.updateListener.of((update) => {
-					if (update.docChanged) {
-						this.save(false);
-					}
-				}),
-			],
-		});
-
-		this.editorView = new EditorView({
-			state: this.editorState,
-			parent: this.contentEl,
-		});
 	}
 
 	/**
@@ -71,29 +41,48 @@ export class CSVView extends TextFileView {
 	}
 
 	/**
-	 * Grabs data from the editor.
-	 * This essentially implements the getViewData method.
-	 *
-	 * @returns Content in the editor.
+	 * Renders the CSV data as a simple HTML table
+	 * 
+	 * @param data CSV string to render
 	 */
-	getEditorData(): string {
-		return this.editorView.state.doc.toString();
-	}
-
-	/**
-	 * Method that dispatches editor data.
-	 * This essentially implements the setViewData method.
-	 *
-	 * @param data Content to set in the view.
-	 */
-	dispatchEditorData(data: string) {
-		this.editorView.dispatch({
-			changes: {
-				from: 0,
-				to: this.editorView.state.doc.length,
-				insert: data,
-			},
+	renderTable(data: string): void {
+		this.contentEl.empty();
+		
+		const result = Papa.parse(data, {
+			header: true,
+			skipEmptyLines: true
 		});
+		
+		this.csvData = result;
+		
+		const table = document.createElement("table");
+		table.addClass("csv-table");
+		
+		// Create header row
+		if (result.meta && result.meta.fields) {
+			const thead = table.createEl("thead");
+			const headerRow = thead.createEl("tr");
+			
+			for (const field of result.meta.fields) {
+				headerRow.createEl("th", { text: field });
+			}
+		}
+		
+		// Create data rows
+		const tbody = table.createEl("tbody");
+		if (result.data && Array.isArray(result.data)) {
+			for (const row of result.data) {
+				if (typeof row === 'object' && row !== null) {
+					const tr = tbody.createEl("tr");
+					
+					for (const field of Object.values(row)) {
+						tr.createEl("td", { text: String(field) });
+					}
+				}
+			}
+		}
+		
+		this.contentEl.appendChild(table);
 	}
 
 	/**
@@ -103,28 +92,22 @@ export class CSVView extends TextFileView {
 	 * @returns A string representing the content of the editor.
 	 */
 	getViewData(): string {
-		return this.getEditorData();
+		// If we have parsed CSV data, unparse it back to a string
+		if (this.csvData && this.csvData.data) {
+			return Papa.unparse(this.csvData.data);
+		}
+		return "";
 	}
 
 	/**
 	 * Set the data to the editor.
 	 * This is used to load the file contents.
 	 *
-	 * If clear is set, then it means we're opening a completely different file.
-	 * In that case, you should call clear(), or implement a slightly more efficient
-	 * clearing mechanism given the new data to be set.
-	 *
 	 * @param data data to load
 	 * @param clear whether or not to clear the editor
 	 */
 	setViewData(data: string, clear: boolean): void {
-		if (clear) {
-			// Note: this.clear() destroys the editor completely - this is inaccurate
-			// as we only want to change the editor data.
-			this.dispatchEditorData("");
-		}
-
-		this.dispatchEditorData(data);
+		this.renderTable(data);
 	}
 
 	/**
@@ -135,6 +118,6 @@ export class CSVView extends TextFileView {
 	 * and any caches/indexes associated with the previous file contents.
 	 */
 	clear(): void {
-		this.editorView.destroy();
+		this.contentEl.empty();
 	}
 }
