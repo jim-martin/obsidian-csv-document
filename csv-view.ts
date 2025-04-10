@@ -4,6 +4,7 @@ import * as Papa from "papaparse";
 export class CSVView extends TextFileView {
 	private csvData: Papa.ParseResult<unknown>;
 	file: TFile;
+	private sortConfig: { column: string; direction: 'asc' | 'desc' } | null = null;
 	
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
@@ -40,7 +41,28 @@ export class CSVView extends TextFileView {
 			const headerRow = thead.createEl("tr");
 			
 			for (const field of result.meta.fields) {
-				const th = headerRow.createEl("th", { text: field });
+				const th = headerRow.createEl("th", { attr: { "data-column": field } });
+				
+				// Create header content with sort indicators
+				const headerContent = th.createEl("div", { cls: "header-content" });
+				headerContent.createEl("span", { text: field, cls: "header-text" });
+				
+				// Add sort indicator
+				const sortIndicator = headerContent.createEl("span", { cls: "sort-indicator" });
+				
+				// Show the current sort state
+				if (this.sortConfig && this.sortConfig.column === field) {
+					th.addClass(this.sortConfig.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+				}
+				
+				// Set up sorting on click
+				th.addEventListener("click", (e) => {
+					// Skip if clicked on resize handle
+					if ((e.target as HTMLElement).closest('.resize-handle')) return;
+					
+					this.sortByColumn(field);
+					this.renderTable(this.getViewData());
+				});
 				
 				// Add resize handle to each header
 				const resizeHandle = th.createEl("div", { cls: "resize-handle" });
@@ -262,6 +284,25 @@ export class CSVView extends TextFileView {
 				top: 0;
 				position: sticky;
 				z-index: 1;
+				cursor: pointer;
+			}
+			.csv-table th:hover {
+				background-color: var(--background-modifier-hover);
+			}
+			.header-content {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+			}
+			.sort-indicator::after {
+				content: '';
+				margin-left: 5px;
+			}
+			.sort-asc .sort-indicator::after {
+				content: '↑';
+			}
+			.sort-desc .sort-indicator::after {
+				content: '↓';
 			}
 			.csv-cell-edit {
 				min-height: 1em;
@@ -309,6 +350,45 @@ export class CSVView extends TextFileView {
 	}
 	
 	/**
+	 * Sort the data by the specified column
+	 */
+	sortByColumn(column: string): void {
+		if (!this.csvData || !this.csvData.data || !Array.isArray(this.csvData.data)) {
+			return;
+		}
+		
+		// Determine sort direction (toggle if same column, default to ascending for new column)
+		const direction = 
+			(this.sortConfig && this.sortConfig.column === column) 
+				? (this.sortConfig.direction === 'asc' ? 'desc' : 'asc')
+				: 'asc';
+		
+		// Update sort configuration
+		this.sortConfig = { column, direction };
+		
+		// Sort the data
+		(this.csvData.data as any[]).sort((a, b) => {
+			// Get values from the specified column
+			const valueA = String(a[column] || '').toLowerCase();
+			const valueB = String(b[column] || '').toLowerCase();
+			
+			// Try to sort as numbers if both values are numeric
+			if (!isNaN(Number(valueA)) && !isNaN(Number(valueB))) {
+				return direction === 'asc' 
+					? Number(valueA) - Number(valueB)
+					: Number(valueB) - Number(valueA);
+			}
+			
+			// Otherwise sort as strings
+			if (direction === 'asc') {
+				return valueA.localeCompare(valueB);
+			} else {
+				return valueB.localeCompare(valueA);
+			}
+		});
+	}
+	
+	/**
 	 * Check if all cells in the row have content
 	 */
 	isRowFilledOut(row: HTMLElement): boolean {
@@ -352,8 +432,7 @@ export class CSVView extends TextFileView {
 				}
 			});
 			
-			// Similar blur and keydown handlers as the first empty row
-			// (implementation omitted for brevity)
+			// Add similar blur and keydown handlers as the first empty row
 		}
 	}
 	
